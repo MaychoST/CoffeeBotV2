@@ -28,12 +28,9 @@ logger = logging.getLogger(__name__)
 
 # Создаем клиент Redis с указанием токена
 upstash_redis_url = f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '')}"
-
-# Используем стандартный .from_url(), который точно есть везде
 redis_client = Redis.from_url(upstash_redis_url, decode_responses=True)
-
-# Передаем готовый клиент в хранилище
 storage = RedisStorage(redis=redis_client)
+
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=storage)
 
