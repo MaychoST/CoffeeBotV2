@@ -19,7 +19,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # Пример: redis://localhost:6379/0
 REDIS_URL = os.getenv("REDIS_URL")
-
+REDIS_TOKEN = os.getenv("REDIS_TOKEN")
 
 # --- Критические проверки при запуске ---
 if not BOT_TOKEN:
@@ -33,7 +33,9 @@ if not DATABASE_URL:
 if not REDIS_URL:
     logger.critical("Критическая ошибка: Переменная окружения REDIS_URL не установлена!")
     raise ValueError("REDIS_URL must be set")
-
+if not REDIS_TOKEN:  # <--- ДОБАВИТЬ ЭТОТ БЛОК
+    logger.critical("Критическая ошибка: Переменная окружения REDIS_TOKEN не установлена!")
+    raise ValueError("REDIS_TOKEN must be set")
 
 # --- Некритические проверки (предупреждения) ---
 if not ADMIN_PASSWORD:

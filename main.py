@@ -6,10 +6,11 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.redis import RedisStorage
+import redis.asyncio as redis
 from aiogram.types import Update, BotCommand
 from fastapi import FastAPI
 
-from config import BOT_TOKEN, REDIS_URL
+from config import BOT_TOKEN, DATABASE_URL, REDIS_URL, REDIS_TOKEN
 from handlers import (
     start_handler,
     order_handler,
@@ -24,7 +25,11 @@ from database import get_db_pool, close_db_pool, create_tables, _check_and_popul
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-storage = RedisStorage.from_url(REDIS_URL)
+# Создаем клиент Redis с указанием токена
+redis_client = redis.from_url(REDIS_URL, password=REDIS_TOKEN, decode_responses=True)
+
+# Передаем готовый клиент в хранилище
+storage = RedisStorage(redis=redis_client)
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=storage)
 
