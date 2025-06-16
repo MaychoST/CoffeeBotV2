@@ -1,4 +1,4 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 2.2 - ИСПРАВЛЕНА ОШИБКА STATE)
+# Имя файла: main.py (ФИНАЛЬНАЯ НАДЕЖНАЯ ВЕРСИЯ 3.0)
 
 import logging
 from contextlib import asynccontextmanager
@@ -9,36 +9,36 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.redis import RedisStorage
 from fastapi import FastAPI, Request, Response
 
-from config import (
-    BOT_TOKEN,
-    DATABASE_URL,
-    REDIS_TOKEN,
-    REDIS_URL,
-)
+from config import BOT_TOKEN, DATABASE_URL, REDIS_TOKEN, REDIS_URL
 from database import initialize_database
-from handlers import (
-    admin_menu_management_router,
-    common_router,
-    order_router,
-    report_router,
-    staff_router,
-    start_router,
-)
+from handlers import (admin_menu_management_router, common_router, order_router,
+                      report_router, staff_router, start_router)
 
+# --- Настройка логирования ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Создаем объекты здесь, в глобальной области ---
+# Они будут созданы один раз при первой загрузке модуля Python.
+db_pool = None
+bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
+storage = None  # Создадим после подключения к Redis
+dp = Dispatcher()  # Пока пустой, настроим в lifespan
 
+
+# --- Lifespan Manager: Управляет только подключениями ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Application startup...")
+    global db_pool, storage, dp
+    logger.info("Application startup: establishing connections...")
 
     try:
+        # --- Подключение к PostgreSQL ---
         db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
 
+        # --- Подключение к Redis ---
         redis_host_port = REDIS_URL.replace("https://", "").replace("http://", "")
         redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{redis_host_port}"
-
         redis_client = redis.from_url(redis_connection_url, decode_responses=True)
         await redis_client.ping()
 
@@ -47,12 +47,13 @@ async def lifespan(app: FastAPI):
         logger.critical(f"Failed to establish connections: {e}", exc_info=True)
         raise
 
+    # --- Инициализация и настройка ---
     await initialize_database(db_pool)
     logger.info("Database initialized.")
 
-    bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     storage = RedisStorage(redis=redis_client)
-    dp = Dispatcher(storage=storage, db_pool=db_pool)
+    dp.storage = storage
+    dp.workflow_data["db_pool"] = db_pool
 
     dp.include_router(start_router)
     dp.include_router(common_router)
@@ -61,19 +62,15 @@ async def lifespan(app: FastAPI):
     dp.include_router(admin_menu_management_router)
     dp.include_router(report_router)
 
-    # <<< ВОТ ОНО, ИСПРАВЛЕНИЕ! ВОЗВРАЩАЕМ СОХРАНЕНИЕ В STATE >>>
-    app.state.bot = bot
-    app.state.dp = dp
+    logger.info("Dispatcher configured.")
 
     yield
 
     logger.info("Application shutdown...")
     await dp.storage.close()
     await bot.session.close()
-
-    pool_to_close = dp.workflow_data.get('db_pool')
-    if pool_to_close:
-        await pool_to_close.close()
+    if db_pool:
+        await db_pool.close()
         logger.info("Database pool closed.")
     logger.info("Resources closed.")
 
@@ -83,9 +80,8 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/")
 async def process_webhook(request: Request, response: Response):
-    # Теперь этот код будет работать, потому что bot и dp есть в app.state
-    bot: Bot = request.app.state.bot
-    dp: Dispatcher = request.app.state.dp
+    # --- ИЗМЕНЕНИЕ: Берем объекты из глобальной области, а не из app.state ---
+    global bot, dp
 
     try:
         update_data = await request.json()
@@ -93,6 +89,7 @@ async def process_webhook(request: Request, response: Response):
         await dp.feed_update(bot=bot, update=update)
     except Exception as e:
         logger.error(f"Error processing update: {e}", exc_info=True)
+        # Всегда возвращаем 200, чтобы телеграм не спамил
         response.status_code = 200
         return response
 
