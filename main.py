@@ -13,8 +13,8 @@ from config import (
     DATABASE_URL,
     REDIS_TOKEN,
     REDIS_URL,
-    ADMIN_PASS,  # Убедимся, что все импортировано
-    BARISTA_PASS,
+    ADMIN_PASSWORD,  # <--- ИСПРАВЛЕНО
+    BARISTA_PASSWORD,  # <--- ИСПРАВЛЕНО
 )
 from database import init_db
 from handlers import (
