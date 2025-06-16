@@ -1,0 +1,25 @@
+# Виртуальное окружение
+venv/
+venv_clean/
+.venv/
+
+# Файлы кэша Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Файлы IDE (PyCharm, VSCode)
+.idea/
+.vscode/
+
+# Локальные файлы окружения
+.env
+
+# Файлы баз данных и логов
+*.db
+*.sqlite3
+*.log
+
+# Другой мусор
+.DS_Store
