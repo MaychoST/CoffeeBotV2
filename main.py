@@ -23,7 +23,7 @@ from handlers import (
     common_router,
     order_router,
     # report_router,
-    # staff_router,
+    staff_router,
     start_router,
 )
 
@@ -69,7 +69,7 @@ async def lifespan(app: FastAPI):
     dp.include_router(common_router)
     dp.include_router(order_router)
     # dp.include_router(admin_menu_management_router) # <-- Временно отключен
-    # dp.include_router(staff_router) # <-- Временно отключен
+    dp.include_router(staff_router) 
     # dp.include_router(report_handler) # <-- Временно отключен
 
     # Сохраняем объекты в состояние приложения, чтобы иметь к ним доступ в вебхуке
