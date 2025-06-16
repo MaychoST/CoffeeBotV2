@@ -1,4 +1,13 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 7.0 - ПРОМЫШЛЕННЫЙ СТАНДАРТ)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 8.0 - РЕШЕНИЕ ПРОБЛЕМЫ С LOOP)
+
+# <<< ДОБАВЛЕНЫ СТРОКИ ДЛЯ СОВМЕСТИМОСТИ EVENT LOOP >>>
+import asyncio
+import sys
+
+# Проверяем ОС и устанавливаем нужную политику. Это стандартная практика для кроссплатформенности.
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+# <<< КОНЕЦ ИЗМЕНЕНИЯ >>>
 
 import logging
 from contextlib import asynccontextmanager
@@ -22,14 +31,14 @@ logger = logging.getLogger(__name__)
 
 # --- ГЛОБАЛЬНЫЕ ОБЪЕКТЫ ---
 # Создаем объекты здесь. Они будут существовать всегда, для любой копии приложения.
-# Это решает проблему "холодных стартов".
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-storage = RedisStorage.from_url(f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '')}")
+# Формируем URL для Redis сразу, так как он не меняется
+redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '').replace('http://', '')}"
+storage = RedisStorage.from_url(redis_connection_url)
 dp = Dispatcher(storage=storage)
 
 
 # --- MIDDLEWARE для пула соединений ---
-# Это самый надежный способ передать пул в хэндлеры.
 class DbPoolMiddleware(BaseMiddleware):
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
@@ -49,7 +58,6 @@ class DbPoolMiddleware(BaseMiddleware):
 async def lifespan(app: FastAPI):
     logger.info("Application startup...")
 
-    # Создаем и проверяем пул соединений с БД
     db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
     await initialize_database(db_pool)
     logger.info("Database connection established and initialized.")
@@ -81,7 +89,6 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/")
 async def process_webhook(request: Request, response: Response):
-    # Используем глобальные, всегда существующие объекты bot и dp
     try:
         update_data = await request.json()
         update = types.Update.model_validate(update_data, context={"bot": bot})
