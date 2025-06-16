@@ -1,4 +1,5 @@
-import asyncio
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ)
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -13,10 +14,10 @@ from config import (
     DATABASE_URL,
     REDIS_TOKEN,
     REDIS_URL,
-    ADMIN_PASSWORD,  # <--- ИСПРАВЛЕНО
-    BARISTA_PASSWORD,  # <--- ИСПРАВЛЕНО
 )
-from database import init_db
+# <<< ИЗМЕНЕНИЕ: Импортируем новую функцию
+from database import initialize_database
+# <<< ИЗМЕНЕНИЕ: Импорты теперь должны работать благодаря новому __init__.py
 from handlers import (
     admin_menu_management_router,
     common_router,
@@ -27,7 +28,7 @@ from handlers import (
 )
 
 # --- Настройка логирования ---
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -37,23 +38,31 @@ async def lifespan(app: FastAPI):
     logger.info("Application startup...")
     # Создаем подключения
     try:
+        # <<< ИЗМЕНЕНИЕ: Создаем пул соединений PostgreSQL
         db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
-        upstash_redis_url = f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '')}"
+
+        # <<< ИЗМЕНЕНИЕ: Формируем URL для Upstash Redis
+        # Формат: rediss://default:<password>@<host>:<port>
+        upstash_redis_url = f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.split('//')[1]}"
         redis_client = redis.from_url(upstash_redis_url, decode_responses=True)
-        await redis_client.ping()  # Проверяем соединение
+        await redis_client.ping()
         logger.info("Database and Redis connections established.")
     except Exception as e:
-        logger.critical(f"Failed to establish connections: {e}")
+        logger.critical(f"Failed to establish connections: {e}", exc_info=True)
         raise
 
-    # Инициализируем БД
-    await init_db(db_pool)
+    # <<< КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Инициализируем БД, передавая пул
+    await initialize_database(db_pool)
     logger.info("Database initialized.")
 
     # Создаем и настраиваем Aiogram
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     storage = RedisStorage(redis=redis_client)
-    dp = Dispatcher(storage=storage)
+
+    # <<< КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Передаем пул соединений в Dispatcher.
+    # Теперь он будет доступен во всех хэндлерах через `state.bot.db_pool` или как аргумент.
+    # Для этого мы передаем его как keyword-аргумент.
+    dp = Dispatcher(storage=storage, db_pool=db_pool)
 
     # Регистрируем роутеры
     dp.include_router(start_router)
@@ -63,18 +72,26 @@ async def lifespan(app: FastAPI):
     dp.include_router(staff_router)
     dp.include_router(report_router)
 
-    # Сохраняем объекты в состояние приложения, чтобы иметь к ним доступ
+    # Сохраняем объекты в состояние приложения, чтобы иметь к ним доступ в вебхуке
     app.state.bot = bot
     app.state.dp = dp
-    app.state.db_pool = db_pool
+
+    # Пул больше не нужно хранить в app.state, так как он теперь внутри Dispatcher
+    # app.state.db_pool = db_pool
 
     yield
 
     # Закрываем подключения при остановке
     logger.info("Application shutdown...")
-    await app.state.dp.storage.close()
-    await app.state.bot.session.close()
-    await app.state.db_pool.close()
+    await dp.storage.close()
+    await dp.fsm.storage.close()  # Явное закрытие для некоторых версий
+    await bot.session.close()
+
+    # <<< ИЗМЕНЕНИЕ: Получаем пул из диспетчера для закрытия
+    pool_to_close = dp.workflow_data.get('db_pool')
+    if pool_to_close:
+        await pool_to_close.close()
+        logger.info("Database pool closed.")
     logger.info("Resources closed.")
 
 
@@ -84,17 +101,22 @@ app = FastAPI(lifespan=lifespan)
 
 # --- Вебхук-обработчик ---
 @app.post("/")
-async def process_webhook(request: Request):
-    # Берем объекты bot и dp из состояния приложения
+async def process_webhook(request: Request, response: Response):
     bot: Bot = request.app.state.bot
     dp: Dispatcher = request.app.state.dp
 
-    # Передаем обновление в Aiogram
-    update_data = await request.json()
-    update = types.Update.model_validate(update_data, context={"bot": bot})
-    await dp.feed_update(bot=bot, update=update)
+    try:
+        update_data = await request.json()
+        update = types.Update.model_validate(update_data, context={"bot": bot})
+        await dp.feed_update(bot=bot, update=update)
+    except Exception as e:
+        logger.error(f"Error processing update: {e}", exc_info=True)
+        # Важно вернуть 200, чтобы телеграм не пытался повторить отправку
+        response.status_code = 200
+        return response
 
-    return Response(status_code=200)
+    response.status_code = 200
+    return response
 
 
 @app.get("/")
