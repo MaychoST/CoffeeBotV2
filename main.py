@@ -19,11 +19,11 @@ from config import (
 from database import initialize_database
 # <<< ИЗМЕНЕНИЕ: Импорты теперь должны работать благодаря новому __init__.py
 from handlers import (
-    admin_menu_management_router,
+    # admin_menu_management_router,
     common_router,
-    order_router,
-    report_router,
-    staff_router,
+    # order_router,
+    # report_router,
+    # staff_router,
     start_router,
 )
 
@@ -67,10 +67,10 @@ async def lifespan(app: FastAPI):
     # Регистрируем роутеры
     dp.include_router(start_router)
     dp.include_router(common_router)
-    dp.include_router(order_router)
-    dp.include_router(admin_menu_management_router)
-    dp.include_router(staff_router)
-    dp.include_router(report_router)
+    # dp.include_router(order_router) # <-- Временно отключен
+    # dp.include_router(admin_menu_management_router) # <-- Временно отключен
+    # dp.include_router(staff_router) # <-- Временно отключен
+    # dp.include_router(report_handler) # <-- Временно отключен
 
     # Сохраняем объекты в состояние приложения, чтобы иметь к ним доступ в вебхуке
     app.state.bot = bot
