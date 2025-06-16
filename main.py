@@ -1,4 +1,4 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 4.0 - НАДЕЖНАЯ АРХИТЕКТУРА)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 5.0 - УСТОЙЧИВАЯ К ХОЛОДНЫМ СТАРТАМ)
 
 import logging
 from contextlib import asynccontextmanager
@@ -18,13 +18,20 @@ from handlers import (admin_menu_management_router, common_router, order_router,
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Создаем объекты здесь, в глобальной области ---
+# Они будут созданы один раз при первой загрузке модуля Python.
+db_pool: asyncpg.Pool | None = None
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+storage: RedisStorage | None = None
+dp = Dispatcher()  # Пока пустой, настроим в lifespan
 
-# --- Lifespan Manager: Создает и управляет ВСЕМИ объектами ---
+
+# --- Lifespan Manager: Управляет только подключениями и конфигурацией ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Application startup...")
+    global db_pool, storage, dp
+    logger.info("Application startup: establishing connections...")
 
-    # 1. Создаем подключения
     try:
         db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
 
@@ -38,16 +45,12 @@ async def lifespan(app: FastAPI):
         logger.critical(f"Failed to establish connections: {e}", exc_info=True)
         raise
 
-    # 2. Инициализируем БД
     await initialize_database(db_pool)
     logger.info("Database initialized.")
 
-    # 3. Создаем и конфигурируем Aiogram ПОСЛЕ всех подключений
     storage = RedisStorage(redis=redis_client)
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-
-    # Инициализируем Dispatcher СРАЗУ с хранилищем и пулом БД
-    dp = Dispatcher(storage=storage, db_pool=db_pool)
+    dp.storage = storage
+    dp.workflow_data["db_pool"] = db_pool
 
     # Включаем все роутеры
     dp.include_router(start_router)
@@ -57,21 +60,16 @@ async def lifespan(app: FastAPI):
     dp.include_router(admin_menu_management_router)
     dp.include_router(report_router)
 
-    # 4. Сохраняем готовые объекты в state приложения
-    app.state.bot = bot
-    app.state.dp = dp
-
-    logger.info("Dispatcher configured and dependencies stored in app.state.")
+    logger.info("Dispatcher configured.")
 
     yield
 
     logger.info("Application shutdown...")
-    if app.state.dp:
-        await app.state.dp.storage.close()
-    if app.state.bot:
-        await app.state.bot.session.close()
-    # Пул больше не хранится в app.state, он внутри dp, но закроем его явно, если он был создан
-    if 'db_pool' in locals() and db_pool:
+    if dp and dp.storage:
+        await dp.storage.close()
+    if bot and bot.session:
+        await bot.session.close()
+    if db_pool:
         await db_pool.close()
         logger.info("Database pool closed.")
     logger.info("Resources closed.")
@@ -82,9 +80,8 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/")
 async def process_webhook(request: Request, response: Response):
-    # Берем объекты из app.state - это самый надежный способ в FastAPI
-    bot: Bot = request.app.state.bot
-    dp: Dispatcher = request.app.state.dp
+    # --- ИЗМЕНЕНИЕ: Берем объекты из глобальной области, а не из app.state ---
+    global bot, dp
 
     try:
         update_data = await request.json()
