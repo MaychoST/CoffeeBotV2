@@ -1,13 +1,4 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 8.0 - РЕШЕНИЕ ПРОБЛЕМЫ С LOOP)
-
-# <<< ДОБАВЛЕНЫ СТРОКИ ДЛЯ СОВМЕСТИМОСТИ EVENT LOOP >>>
-import asyncio
-import sys
-
-# Проверяем ОС и устанавливаем нужную политику. Это стандартная практика для кроссплатформенности.
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-# <<< КОНЕЦ ИЗМЕНЕНИЯ >>>
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 9.0 - НАДЕЖНАЯ СБОРКА)
 
 import logging
 from contextlib import asynccontextmanager
@@ -29,16 +20,9 @@ from handlers import (admin_menu_management_router, common_router, order_router,
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- ГЛОБАЛЬНЫЕ ОБЪЕКТЫ ---
-# Создаем объекты здесь. Они будут существовать всегда, для любой копии приложения.
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-# Формируем URL для Redis сразу, так как он не меняется
-redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '').replace('http://', '')}"
-storage = RedisStorage.from_url(redis_connection_url)
-dp = Dispatcher(storage=storage)
 
-
-# --- MIDDLEWARE для пула соединений ---
+# --- Middleware для пула соединений ---
+# Этот "посредник" будет добавлять db_pool в каждое событие
 class DbPoolMiddleware(BaseMiddleware):
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
@@ -53,17 +37,35 @@ class DbPoolMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
-# --- LIFESPAN: Управляет только внешними подключениями ---
+# --- LIFESPAN: Создает, настраивает и управляет всеми объектами ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup...")
 
-    db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
-    await initialize_database(db_pool)
-    logger.info("Database connection established and initialized.")
+    # 1. Создаем подключения
+    try:
+        db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
 
-    # Регистрируем Middleware, передавая ему созданный пул
-    dp.update.outer_middleware.register(DbPoolMiddleware(db_pool))
+        redis_host_port = REDIS_URL.replace("https://", "").replace("http://", "")
+        redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{redis_host_port}"
+        redis_client = redis.from_url(redis_connection_url, decode_responses=True)
+        await redis_client.ping()
+
+        logger.info("Database and Redis connections established.")
+    except Exception as e:
+        logger.critical(f"Failed to establish connections: {e}", exc_info=True)
+        raise
+
+    # 2. Инициализируем БД
+    await initialize_database(db_pool)
+    logger.info("Database initialized.")
+
+    # 3. Создаем и конфигурируем Aiogram ПОЛНОСТЬЮ
+    storage = RedisStorage(redis=redis_client)
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+
+    # Инициализируем Dispatcher СРАЗУ с хранилищем
+    dp = Dispatcher(storage=storage)
 
     # Включаем все роутеры
     dp.include_router(start_router)
@@ -73,15 +75,28 @@ async def lifespan(app: FastAPI):
     dp.include_router(admin_menu_management_router)
     dp.include_router(report_router)
 
-    logger.info("Dispatcher configured.")
+    # Регистрируем Middleware для БД
+    dp.update.outer_middleware.register(DbPoolMiddleware(db_pool))
+
+    # 4. Сохраняем ГОТОВЫЕ объекты в state приложения
+    app.state.bot = bot
+    app.state.dp = dp
+    # Сохраним и пул, чтобы иметь возможность его закрыть
+    app.state.db_pool = db_pool
+
+    logger.info("Dispatcher configured and dependencies stored in app.state.")
 
     yield
 
     logger.info("Application shutdown...")
-    await dp.storage.close()
-    await bot.session.close()
-    await db_pool.close()
-    logger.info("All connections closed.")
+    if hasattr(app.state, 'dp') and app.state.dp:
+        await app.state.dp.storage.close()
+    if hasattr(app.state, 'bot') and app.state.bot:
+        await app.state.bot.session.close()
+    if hasattr(app.state, 'db_pool') and app.state.db_pool:
+        await app.state.db_pool.close()
+        logger.info("Database pool closed.")
+    logger.info("Resources closed.")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -89,6 +104,10 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/")
 async def process_webhook(request: Request, response: Response):
+    # Берем готовые объекты из app.state
+    bot: Bot = request.app.state.bot
+    dp: Dispatcher = request.app.state.dp
+
     try:
         update_data = await request.json()
         update = types.Update.model_validate(update_data, context={"bot": bot})
