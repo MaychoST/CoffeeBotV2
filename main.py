@@ -1,4 +1,4 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 10.0 - БЕЗ КОСТЫЛЕЙ)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 11.0 - ЧИСТАЯ)
 
 import logging
 from contextlib import asynccontextmanager
@@ -69,10 +69,14 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Application shutdown...")
-    await app.state.dp.storage.close()
-    await app.state.bot.session.close()
-    await app.state.db_pool.close()
-    logger.info("Database pool closed.")
+    if hasattr(app.state, 'dp') and app.state.dp:
+        await app.state.dp.storage.close()
+    if hasattr(app.state, 'bot') and app.state.bot:
+        await app.state.bot.session.close()
+    if hasattr(app.state, 'db_pool') and app.state.db_pool:
+        await app.state.db_pool.close()
+        logger.info("Database pool closed.")
+    logger.info("Resources closed.")
 
 
 app = FastAPI(lifespan=lifespan)
