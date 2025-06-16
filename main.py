@@ -1,11 +1,13 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ НАДЕЖНАЯ ВЕРСИЯ 3.0)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 3.1 - ИСПРАВЛЕНА ИНИЦИАЛИЗАЦИЯ БОТА)
 
 import logging
 from contextlib import asynccontextmanager
 
 import asyncpg
 import redis.asyncio as redis
+# <<< ИЗМЕНЕНИЕ: Добавляем необходимые импорты
 from aiogram import Bot, Dispatcher, types
+from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.redis import RedisStorage
 from fastapi import FastAPI, Request, Response
 
@@ -14,29 +16,24 @@ from database import initialize_database
 from handlers import (admin_menu_management_router, common_router, order_router,
                       report_router, staff_router, start_router)
 
-# --- Настройка логирования ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Создаем объекты здесь, в глобальной области ---
-# Они будут созданы один раз при первой загрузке модуля Python.
+# --- ГЛАВНОЕ ИЗМЕНЕНИЕ: Создаем Bot с использованием DefaultBotProperties ---
 db_pool = None
-bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
-storage = None  # Создадим после подключения к Redis
-dp = Dispatcher()  # Пока пустой, настроим в lifespan
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+storage = None
+dp = Dispatcher()
 
 
-# --- Lifespan Manager: Управляет только подключениями ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global db_pool, storage, dp
     logger.info("Application startup: establishing connections...")
 
     try:
-        # --- Подключение к PostgreSQL ---
         db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
 
-        # --- Подключение к Redis ---
         redis_host_port = REDIS_URL.replace("https://", "").replace("http://", "")
         redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{redis_host_port}"
         redis_client = redis.from_url(redis_connection_url, decode_responses=True)
@@ -47,12 +44,12 @@ async def lifespan(app: FastAPI):
         logger.critical(f"Failed to establish connections: {e}", exc_info=True)
         raise
 
-    # --- Инициализация и настройка ---
     await initialize_database(db_pool)
     logger.info("Database initialized.")
 
     storage = RedisStorage(redis=redis_client)
     dp.storage = storage
+    # Передаем пул в workflow_data, чтобы он был доступен как аргумент в хэндлерах
     dp.workflow_data["db_pool"] = db_pool
 
     dp.include_router(start_router)
@@ -80,7 +77,6 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/")
 async def process_webhook(request: Request, response: Response):
-    # --- ИЗМЕНЕНИЕ: Берем объекты из глобальной области, а не из app.state ---
     global bot, dp
 
     try:
@@ -89,7 +85,6 @@ async def process_webhook(request: Request, response: Response):
         await dp.feed_update(bot=bot, update=update)
     except Exception as e:
         logger.error(f"Error processing update: {e}", exc_info=True)
-        # Всегда возвращаем 200, чтобы телеграм не спамил
         response.status_code = 200
         return response
 
