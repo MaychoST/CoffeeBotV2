@@ -1,4 +1,11 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 9.0 - НАДЕЖНАЯ СБОРКА)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 9.0 - С nest_asyncio)
+import asyncio
+
+# <<< ГЛАВНОЕ ИЗМЕНЕНИЕ: Устраняем конфликт циклов событий >>>
+import nest_asyncio
+
+nest_asyncio.apply()
+# <<< КОНЕЦ ИЗМЕНЕНИЯ >>>
 
 import logging
 from contextlib import asynccontextmanager
@@ -21,8 +28,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-# --- Middleware для пула соединений ---
-# Этот "посредник" будет добавлять db_pool в каждое событие
+# --- MIDDLEWARE для пула соединений ---
 class DbPoolMiddleware(BaseMiddleware):
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
@@ -37,54 +43,35 @@ class DbPoolMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
-# --- LIFESPAN: Создает, настраивает и управляет всеми объектами ---
+# --- LIFESPAN: Управляет только подключениями ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup...")
 
-    # 1. Создаем подключения
-    try:
-        db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
+    # --- Создаем глобальные переменные внутри lifespan ---
+    # Это гарантирует, что они создаются в правильном цикле событий.
+    app.state.db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
+    await initialize_database(app.state.db_pool)
+    logger.info("Database connection established and initialized.")
 
-        redis_host_port = REDIS_URL.replace("https://", "").replace("http://", "")
-        redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{redis_host_port}"
-        redis_client = redis.from_url(redis_connection_url, decode_responses=True)
-        await redis_client.ping()
+    redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '').replace('http://', '')}"
+    storage = RedisStorage.from_url(redis_connection_url)
 
-        logger.info("Database and Redis connections established.")
-    except Exception as e:
-        logger.critical(f"Failed to establish connections: {e}", exc_info=True)
-        raise
-
-    # 2. Инициализируем БД
-    await initialize_database(db_pool)
-    logger.info("Database initialized.")
-
-    # 3. Создаем и конфигурируем Aiogram ПОЛНОСТЬЮ
-    storage = RedisStorage(redis=redis_client)
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-
-    # Инициализируем Dispatcher СРАЗУ с хранилищем
-    dp = Dispatcher(storage=storage)
+    app.state.bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    app.state.dp = Dispatcher(storage=storage)
 
     # Включаем все роутеры
-    dp.include_router(start_router)
-    dp.include_router(common_router)
-    dp.include_router(order_router)
-    dp.include_router(staff_router)
-    dp.include_router(admin_menu_management_router)
-    dp.include_router(report_router)
+    app.state.dp.include_router(start_router)
+    app.state.dp.include_router(common_router)
+    app.state.dp.include_router(order_router)
+    app.state.dp.include_router(staff_router)
+    app.state.dp.include_router(admin_menu_management_router)
+    app.state.dp.include_router(report_router)
 
-    # Регистрируем Middleware для БД
-    dp.update.outer_middleware.register(DbPoolMiddleware(db_pool))
+    # Регистрируем Middleware
+    app.state.dp.update.outer_middleware.register(DbPoolMiddleware(app.state.db_pool))
 
-    # 4. Сохраняем ГОТОВЫЕ объекты в state приложения
-    app.state.bot = bot
-    app.state.dp = dp
-    # Сохраним и пул, чтобы иметь возможность его закрыть
-    app.state.db_pool = db_pool
-
-    logger.info("Dispatcher configured and dependencies stored in app.state.")
+    logger.info("Dispatcher configured.")
 
     yield
 
@@ -104,14 +91,10 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/")
 async def process_webhook(request: Request, response: Response):
-    # Берем готовые объекты из app.state
-    bot: Bot = request.app.state.bot
-    dp: Dispatcher = request.app.state.dp
-
     try:
         update_data = await request.json()
-        update = types.Update.model_validate(update_data, context={"bot": bot})
-        await dp.feed_update(bot=bot, update=update)
+        update = types.Update.model_validate(update_data, context={"bot": request.app.state.bot})
+        await request.app.state.dp.feed_update(bot=request.app.state.bot, update=update)
     except Exception as e:
         logger.error(f"Error processing update: {e}", exc_info=True)
         response.status_code = 200
