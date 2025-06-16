@@ -1,4 +1,4 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 6.0 - С НАДЕЖНЫМ MIDDLEWARE)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 7.0 - ПРОМЫШЛЕННЫЙ СТАНДАРТ)
 
 import logging
 from contextlib import asynccontextmanager
@@ -20,9 +20,16 @@ from handlers import (admin_menu_management_router, common_router, order_router,
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# --- ГЛОБАЛЬНЫЕ ОБЪЕКТЫ ---
+# Создаем объекты здесь. Они будут существовать всегда, для любой копии приложения.
+# Это решает проблему "холодных стартов".
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+storage = RedisStorage.from_url(f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '')}")
+dp = Dispatcher(storage=storage)
 
-# --- ГЛАВНОЕ ИЗМЕНЕНИЕ: MIDDLEWARE для пула соединений ---
-# Этот "посредник" будет добавлять db_pool в каждое событие
+
+# --- MIDDLEWARE для пула соединений ---
+# Это самый надежный способ передать пул в хэндлеры.
 class DbPoolMiddleware(BaseMiddleware):
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
@@ -33,38 +40,24 @@ class DbPoolMiddleware(BaseMiddleware):
             event: types.TelegramObject,
             data: Dict[str, Any],
     ) -> Any:
-        # Добавляем пул в словарь данных, который доступен в хэндлерах
         data["db_pool"] = self.pool
         return await handler(event, data)
 
 
-# --- Lifespan Manager: Управляет только подключениями ---
+# --- LIFESPAN: Управляет только внешними подключениями ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup...")
 
-    try:
-        db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
-
-        redis_host_port = REDIS_URL.replace("https://", "").replace("http://", "")
-        redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{redis_host_port}"
-        redis_client = redis.from_url(redis_connection_url, decode_responses=True)
-        await redis_client.ping()
-
-        logger.info("Database and Redis connections established.")
-    except Exception as e:
-        logger.critical(f"Failed to establish connections: {e}", exc_info=True)
-        raise
-
+    # Создаем и проверяем пул соединений с БД
+    db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
     await initialize_database(db_pool)
-    logger.info("Database initialized.")
+    logger.info("Database connection established and initialized.")
 
-    # Создаем объекты Aiogram
-    storage = RedisStorage(redis=redis_client)
-    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-    dp = Dispatcher(storage=storage)
+    # Регистрируем Middleware, передавая ему созданный пул
+    dp.update.outer_middleware.register(DbPoolMiddleware(db_pool))
 
-    # Включаем роутеры
+    # Включаем все роутеры
     dp.include_router(start_router)
     dp.include_router(common_router)
     dp.include_router(order_router)
@@ -72,29 +65,15 @@ async def lifespan(app: FastAPI):
     dp.include_router(admin_menu_management_router)
     dp.include_router(report_router)
 
-    # --- РЕГИСТРИРУЕМ НАШ MIDDLEWARE ---
-    # Это гарантирует, что db_pool будет доступен в КАЖДОМ хэндлере
-    dp.update.outer_middleware.register(DbPoolMiddleware(db_pool))
-
-    # Сохраняем ключевые объекты в state, чтобы вебхук мог их найти
-    app.state.bot = bot
-    app.state.dp = dp
-    app.state.db_pool = db_pool  # Сохраним и пул на всякий случай
-
-    logger.info("Dispatcher configured and ready.")
+    logger.info("Dispatcher configured.")
 
     yield
 
     logger.info("Application shutdown...")
-    # Закрываем соединения из state
-    if hasattr(app.state, 'dp') and app.state.dp:
-        await app.state.dp.storage.close()
-    if hasattr(app.state, 'bot') and app.state.bot:
-        await app.state.bot.session.close()
-    if hasattr(app.state, 'db_pool') and app.state.db_pool:
-        await app.state.db_pool.close()
-        logger.info("Database pool closed.")
-    logger.info("Resources closed.")
+    await dp.storage.close()
+    await bot.session.close()
+    await db_pool.close()
+    logger.info("All connections closed.")
 
 
 app = FastAPI(lifespan=lifespan)
@@ -102,10 +81,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/")
 async def process_webhook(request: Request, response: Response):
-    # Берем объекты из app.state
-    bot: Bot = request.app.state.bot
-    dp: Dispatcher = request.app.state.dp
-
+    # Используем глобальные, всегда существующие объекты bot и dp
     try:
         update_data = await request.json()
         update = types.Update.model_validate(update_data, context={"bot": bot})
