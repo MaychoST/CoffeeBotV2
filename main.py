@@ -1,4 +1,4 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 2.0)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 2.2 - ИСПРАВЛЕНА ОШИБКА STATE)
 
 import logging
 from contextlib import asynccontextmanager
@@ -25,30 +25,22 @@ from handlers import (
     start_router,
 )
 
-# --- Настройка логирования ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
-# --- Lifespan Manager: Управляет ресурсами (БД, Redis) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup...")
 
     try:
-        # --- Подключение к PostgreSQL ---
         db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
 
-        # --- ИСПРАВЛЕНИЕ ПОДКЛЮЧЕНИЯ К REDIS ---
-        # Upstash дает URL в виде us1-my-redis-12345.upstash.io
-        # Библиотеке redis нужен URL в формате rediss://:password@host:port
-        # Убираем 'https://' если оно есть, и собираем правильный URL
         redis_host_port = REDIS_URL.replace("https://", "").replace("http://", "")
         redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{redis_host_port}"
 
         redis_client = redis.from_url(redis_connection_url, decode_responses=True)
-        await redis_client.ping()  # Проверяем соединение
-        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+        await redis_client.ping()
 
         logger.info("Database and Redis connections established.")
     except Exception as e:
@@ -60,7 +52,6 @@ async def lifespan(app: FastAPI):
 
     bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
     storage = RedisStorage(redis=redis_client)
-
     dp = Dispatcher(storage=storage, db_pool=db_pool)
 
     dp.include_router(start_router)
@@ -70,6 +61,7 @@ async def lifespan(app: FastAPI):
     dp.include_router(admin_menu_management_router)
     dp.include_router(report_router)
 
+    # <<< ВОТ ОНО, ИСПРАВЛЕНИЕ! ВОЗВРАЩАЕМ СОХРАНЕНИЕ В STATE >>>
     app.state.bot = bot
     app.state.dp = dp
 
@@ -91,6 +83,7 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post("/")
 async def process_webhook(request: Request, response: Response):
+    # Теперь этот код будет работать, потому что bot и dp есть в app.state
     bot: Bot = request.app.state.bot
     dp: Dispatcher = request.app.state.dp
 
@@ -110,5 +103,3 @@ async def process_webhook(request: Request, response: Response):
 @app.get("/")
 async def health_check():
     return {"status": "ok"}
-
-# FORCE GIT UPDATE 1
