@@ -1,4 +1,4 @@
-# Имя файла: main.py (САМАЯ ФИНАЛЬНАЯ ВЕРСИЯ)
+# Имя файла: main.py (ФИНАЛЬНАЯ АРХИТЕКТУРА "ДЗЕН")
 
 import logging
 import asyncpg
@@ -15,41 +15,50 @@ from handlers import (admin_menu_management_router, common_router, order_router,
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Создаем "дешевые" объекты глобально
-storage = RedisStorage.from_url(REDIS_DSN)
-bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
-dp = Dispatcher(storage=storage)
-
-# Регистрируем роутеры
-dp.include_router(start_router)
-dp.include_router(common_router)
-dp.include_router(order_router)
-dp.include_router(staff_router)
-dp.include_router(admin_menu_management_router)
-dp.include_router(report_router)
-logger.info("Bot, Dispatcher, and Routers are configured.")
-
-# FastAPI приложение
-app = FastAPI()
+# --- FastAPI приложение ---
+app = FastAPI(lifespan=None)  # Убираем lifespan полностью
 
 
 @app.post("/")
 async def process_webhook(request: Request):
-    # Создаем пул на каждый запрос
-    pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
+    """
+    На каждый запрос мы будем полностью создавать и уничтожать все объекты.
+    Это гарантирует, что никакие соединения не "протухнут".
+    """
 
-    update = types.Update.model_validate(await request.json(), context={"bot": bot})
+    # 1. Создаем объекты бота и хранилища FSM
+    storage = RedisStorage.from_url(REDIS_DSN)
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+
+    # 2. Создаем диспетчер и регистрируем в нем роутеры
+    dp = Dispatcher(storage=storage)
+    dp.include_router(start_router)
+    dp.include_router(common_router)
+    dp.include_router(order_router)
+    dp.include_router(staff_router)
+    dp.include_router(admin_menu_management_router)
+    dp.include_router(report_router)
+
+    # 3. Создаем пул соединений с БД
+    db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
+
+    # 4. Получаем обновление от Telegram
+    update_data = await request.json()
+    update = types.Update.model_validate(update_data, context={"bot": bot})
+
     try:
-        # Передаем пул напрямую в хендлеры!
-        # Aiogram автоматически подставит его в те хендлеры, где он указан как аргумент `db_pool: asyncpg.Pool`
-        await dp.feed_update(bot=bot, update=update, db_pool=pool)
+        # 5. Запускаем обработку, передавая пул в хендлеры
+        await dp.feed_update(bot=bot, update=update, db_pool=db_pool)
     finally:
-        # Гарантированно закрываем пул
-        await pool.close()
+        # 6. ГАРАНТИРОВАННО ЗАКРЫВАЕМ ВСЕ СОЕДИНЕНИЯ
+        await db_pool.close()
+        await dp.storage.close()
+        await bot.session.close()
+        logger.info("All connections for this request have been closed.")
 
     return Response(status_code=200)
 
 
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "message": "CoffeeBotV2 is fully operational!"}
+    return {"status": "ok", "message": "CoffeeBotV2 is fully operational! (Zen architecture)"}
