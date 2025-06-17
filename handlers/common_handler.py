@@ -21,13 +21,12 @@ async def check_auth(target: Message | CallbackQuery, state: FSMContext) -> str 
     role = data.get('role')
     if role not in ['admin', 'barista']:
         if isinstance(target, Message):
-            # Сообщение стало более общим
             await target.answer("Эта функция доступна только авторизованным пользователям. Введите пароль или /start.")
+        # Для колбэков можно добавить target.answer("Доступ запрещен", show_alert=True) если нужно
         return None
     return role
 
 
-# --- ГЛАВНОЕ ИЗМЕНЕНИЕ ---
 @router.message(CommandStart(), StateFilter("*"))
 async def handle_start(message: Message, state: FSMContext):
     user_data = await state.get_data()
@@ -35,7 +34,8 @@ async def handle_start(message: Message, state: FSMContext):
 
     # Если пользователь уже авторизован, просто показываем ему его меню
     if role == 'admin':
-        await message.answer("Вы уже в системе как Администратор. Вот ваше меню:", reply_markup=get_admin_menu_keyboard())
+        await message.answer("Вы уже в системе как Администратор. Вот ваше меню:",
+                             reply_markup=get_admin_menu_keyboard())
         return
     elif role == 'barista':
         await message.answer("Вы уже в системе как Бариста. Вот ваше меню:", reply_markup=get_barista_menu_keyboard())
@@ -93,10 +93,10 @@ async def handle_logout(message: Message, state: FSMContext):
 
 @router.message(Command("bug"), StateFilter("*"))
 async def bug_report_start(message: Message, state: FSMContext):
-    # Используем немного измененную проверку авторизации
     user_data = await state.get_data()
     if 'role' not in user_data:
-        await message.answer("Сначала нужно авторизоваться, чтобы отправить отчет об ошибке. Введите пароль или /start.")
+        await message.answer(
+            "Сначала нужно авторизоваться, чтобы отправить отчет об ошибке. Введите пароль или /start.")
         return
     await state.set_state(BugReportStates.waiting_for_report_text)
     await message.answer("🐞 <b>Сообщить об ошибке</b>\n\nПожалуйста, опишите проблему...",
