@@ -1,4 +1,4 @@
-# Имя файла: config.py (ФИНАЛЬНАЯ ВЕРСИЯ С REDIS_DSN)
+# Имя файла: config.py (ДИАГНОСТИЧЕСКАЯ ВЕРСИЯ БЕЗ ПРОВЕРОК)
 import os
 import logging
 from dotenv import load_dotenv
@@ -14,27 +14,22 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASS")
 BARISTA_PASSWORD = os.getenv("BARISTA_PASS")
 
 # --- Переменные для подключения к базам данных ---
-# Пример: postgresql://user:password@host:port/dbname
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-# ИЗМЕНЕНИЕ: Используем единую строку подключения (DSN) для Redis
-# Пример: rediss://default:password@host:port
 REDIS_DSN = os.getenv("REDIS_DSN")
 
 
-# --- Критические проверки при запуске ---
+# --- ПРОВЕРКИ (ОСТАВЛЯЕМ ТОЛЬКО ЛОГИРОВАНИЕ ДЛЯ ДИАГНОСТИКИ) ---
 if not BOT_TOKEN:
-    logger.critical("Критическая ошибка: Переменная окружения TELEGRAM_BOT_TOKEN не установлена!")
-    raise ValueError("TELEGRAM_BOT_TOKEN must be set")
+    logger.critical("ДИАГНОСТИКА: Переменная окружения TELEGRAM_BOT_TOKEN не найдена!")
+    # raise ValueError("TELEGRAM_BOT_TOKEN must be set")
 
 if not DATABASE_URL:
-    logger.critical("Критическая ошибка: Переменная окружения DATABASE_URL не установлена!")
-    raise ValueError("DATABASE_URL must be set")
+    logger.critical("ДИАГНОСТИКА: Переменная окружения DATABASE_URL не найдена!")
+    # raise ValueError("DATABASE_URL must be set")
 
-# ИЗМЕНЕНИЕ: Проверяем только одну переменную REDIS_DSN
 if not REDIS_DSN:
-    logger.critical("Критическая ошибка: Переменная окружения REDIS_DSN не установлена!")
-    raise ValueError("REDIS_DSN must be set")
+    logger.critical("ДИАГНОСТИКА: Переменная окружения REDIS_DSN не найдена!")
+    # raise ValueError("REDIS_DSN must be set")
 
 # --- Некритические проверки (предупреждения) ---
 if not ADMIN_PASSWORD:
