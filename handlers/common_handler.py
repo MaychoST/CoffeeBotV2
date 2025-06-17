@@ -21,13 +21,27 @@ async def check_auth(target: Message | CallbackQuery, state: FSMContext) -> str 
     role = data.get('role')
     if role not in ['admin', 'barista']:
         if isinstance(target, Message):
-            await target.answer("Эта функция доступна только авторизованным пользователям.")
+            # Сообщение стало более общим
+            await target.answer("Эта функция доступна только авторизованным пользователям. Введите пароль или /start.")
         return None
     return role
 
 
+# --- ГЛАВНОЕ ИЗМЕНЕНИЕ ---
 @router.message(CommandStart(), StateFilter("*"))
 async def handle_start(message: Message, state: FSMContext):
+    user_data = await state.get_data()
+    role = user_data.get('role')
+
+    # Если пользователь уже авторизован, просто показываем ему его меню
+    if role == 'admin':
+        await message.answer("Вы уже в системе как Администратор. Вот ваше меню:", reply_markup=get_admin_menu_keyboard())
+        return
+    elif role == 'barista':
+        await message.answer("Вы уже в системе как Бариста. Вот ваше меню:", reply_markup=get_barista_menu_keyboard())
+        return
+
+    # Если пользователь не авторизован, сбрасываем состояние и просим авторизоваться
     await state.clear()
     await message.answer(
         "👋 <b>Добро пожаловать в CoffeeBotV2!</b>\n\n"
@@ -79,7 +93,10 @@ async def handle_logout(message: Message, state: FSMContext):
 
 @router.message(Command("bug"), StateFilter("*"))
 async def bug_report_start(message: Message, state: FSMContext):
-    if not await check_auth(message, state):
+    # Используем немного измененную проверку авторизации
+    user_data = await state.get_data()
+    if 'role' not in user_data:
+        await message.answer("Сначала нужно авторизоваться, чтобы отправить отчет об ошибке. Введите пароль или /start.")
         return
     await state.set_state(BugReportStates.waiting_for_report_text)
     await message.answer("🐞 <b>Сообщить об ошибке</b>\n\nПожалуйста, опишите проблему...",
@@ -94,7 +111,6 @@ async def bug_report_process_text(message: Message, state: FSMContext, db_pool: 
     if message.text == GENERAL_CANCEL_TEXT:
         response_text = "Отправка отчета отменена."
     else:
-        # <<< ИЗМЕНЕНИЕ: Передаем db_pool
         success = await save_bug_report(db_pool, message.from_user.id, user_role, message.text)
         if success:
             response_text = "✅ Спасибо! Ваш отчет об ошибке отправлен."
