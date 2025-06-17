@@ -1,7 +1,8 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ - ИСПРАВЛЕНИЕ ОШИБКИ РОУТЕРОВ)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ - КЛОНИРОВАНИЕ РОУТЕРОВ)
 
 import logging
 import asyncpg
+from copy import deepcopy
 from aiogram import Bot, Dispatcher, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.redis import RedisStorage
@@ -9,36 +10,24 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from fastapi import FastAPI, Request, Response
 
 from config import BOT_TOKEN, DATABASE_URL, REDIS_DSN
+# Возвращаем глобальные импорты, но будем их клонировать
+from handlers import (common_router, order_router, staff_router,
+                      admin_menu_management_router, report_router, start_router)
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(name)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
-# --- ФУНКЦИЯ ДЛЯ СБОРКИ ДИСПЕТЧЕРА ---
-# Мы вынесли это в отдельную функцию, чтобы не загромождать webhook
-def setup_dispatcher(storage: RedisStorage) -> Dispatcher:
-    dp = Dispatcher(storage=storage)
-
-    # Импортируем роутеры здесь, чтобы они были "свежими"
-    from handlers.common_handler import router as common_router
-    from handlers.order_handler import router as order_router
-    from handlers.staff_handler import router as staff_router
-    from handlers.admin_menu_management_handler import router as admin_menu_management_router
-    from handlers.report_handler import router as report_router
-    from handlers.start_handler import router as start_router
-
-    # ПРАВИЛЬНЫЙ ПОРЯДОК РЕГИСТРАЦИИ
-    dp.include_router(common_router)
-    dp.include_router(order_router)
-    dp.include_router(staff_router)
-    dp.include_router(admin_menu_management_router)
-    dp.include_router(report_router)
-    # Роутер с обработкой простого текста СТАВИМ В САМЫЙ КОНЕЦ
-    dp.include_router(start_router)
-
-    return dp
-
+# --- Список наших роутеров ---
+# Мы определим их один раз, чтобы было удобно
+ALL_ROUTERS = [
+    common_router,
+    order_router,
+    staff_router,
+    admin_menu_management_router,
+    report_router,
+    start_router,  # <-- Порядок здесь важен
+]
 
 # --- FastAPI приложение ---
 app = FastAPI(lifespan=None)
@@ -47,15 +36,18 @@ app = FastAPI(lifespan=None)
 @app.post("/")
 async def process_webhook(request: Request):
     """
-    На каждый запрос мы будем полностью создавать и уничтожать все объекты.
+    Создаем все объекты на каждый запрос, чтобы избежать проблем с состоянием.
     """
 
     session = AiohttpSession()
     storage = RedisStorage.from_url(REDIS_DSN)
     bot = Bot(token=BOT_TOKEN, session=session, default=DefaultBotProperties(parse_mode="HTML"))
+    dp = Dispatcher(storage=storage)
 
-    # Создаем и настраиваем диспетчер
-    dp = setup_dispatcher(storage)
+    # КЛОНИРУЕМ И РЕГИСТРИРУЕМ РОУТЕРЫ
+    # deepcopy создает полную, независимую копию каждого роутера
+    for router_obj in ALL_ROUTERS:
+        dp.include_router(deepcopy(router_obj))
 
     # Создаем пул соединений с БД
     db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
@@ -77,4 +69,4 @@ async def process_webhook(request: Request):
 
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "message": "CoffeeBotV2 is fully operational! (Router fix)"}
+    return {"status": "ok", "message": "CoffeeBotV2 is fully operational! (Cloned Routers)"}

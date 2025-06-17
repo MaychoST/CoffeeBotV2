@@ -6,6 +6,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.state import default_state
 from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
+from aiogram.filters import StateFilter, CommandStart
 
 from config import ADMIN_PASSWORD, BARISTA_PASSWORD
 from keyboards import get_admin_menu_keyboard, get_barista_menu_keyboard, get_auth_keyboard
