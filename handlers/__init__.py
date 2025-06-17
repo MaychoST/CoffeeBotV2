@@ -1,4 +1,4 @@
-# Имя файла: handlers/__init__.py (ФИНАЛЬНАЯ ПОЛНАЯ ВЕРСИЯ)
+# handlers/__init__.py
 
 from .start_handler import router as start_router
 from .common_handler import router as common_router
@@ -11,7 +11,7 @@ __all__ = [
     "start_router",
     "common_router",
     "order_router",
-    "staff_handler",
+    "staff_router",
     "admin_menu_management_router",
     "report_router",
 ]

@@ -255,8 +255,9 @@ async def cq_admin_cat_confirm_delete_action(cq: CallbackQuery, state: FSMContex
 
 @router.callback_query(F.data == CB_PREFIX_ADMIN_CAT_CANCEL_DELETE)
 async def cq_admin_cat_cancel_delete_action(cq: CallbackQuery, state: FSMContext, db_pool: asyncpg.Pool):
-    if not await check_admin_auth(cq, state): return; await show_categories_management_menu(cq, db_pool,
-                                                                                            edit_message=True)
+    if not await check_admin_auth(cq, state):
+        return
+    await show_categories_management_menu(cq, db_pool, edit_message=True)
 
 
 @router.callback_query(F.data.startswith(CB_PREFIX_ADMIN_ITEM_ADD_NEW))

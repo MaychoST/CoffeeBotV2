@@ -159,7 +159,8 @@ async def update_menu_item(pool: asyncpg.Pool, item_id: int, **kwargs) -> bool:
 
 
 async def delete_menu_item(pool: asyncpg.Pool, item_id: int) -> bool: res = await _execute(pool,
-                                                                                           "DELETE FROM menu_items WHERE id = $1",
+                                                                                           "DELETE FROM menu_items "
+                                                                                           "WHERE id = $1",
                                                                                            item_id); return res and "DELETE 1" in res
 
 
@@ -201,7 +202,9 @@ async def update_menu_item_price(pool: asyncpg.Pool, price_id: int, new_price: f
 
 
 async def delete_menu_item_price(pool: asyncpg.Pool, price_id: int) -> bool: res = await _execute(pool,
-                                                                                                  "DELETE FROM menu_item_prices WHERE id = $1",
+                                                                                                  "DELETE FROM "
+                                                                                                  "menu_item_prices "
+                                                                                                  "WHERE id = $1",
                                                                                                   price_id); return res and "DELETE 1" in res
 
 
@@ -213,7 +216,8 @@ async def save_order_to_db(pool: asyncpg.Pool, user_telegram_id: int, order_item
             max_today = await connection.fetchval(query_max_daily)
             next_daily_number = (max_today or 0) + 1
             record = await connection.fetchrow(
-                "INSERT INTO orders (user_telegram_id, total_amount, daily_sequence_number) VALUES ($1, $2, $3) RETURNING id, daily_sequence_number",
+                "INSERT INTO orders (user_telegram_id, total_amount, daily_sequence_number) VALUES ($1, $2, "
+                "$3) RETURNING id, daily_sequence_number",
                 user_telegram_id, total_amount, next_daily_number)
             if not record: return None
             order_id, daily_seq_num = record['id'], record['daily_sequence_number']
@@ -245,7 +249,9 @@ async def get_order_by_id(pool: asyncpg.Pool, order_id: int) -> asyncpg.Record |
 
 
 async def delete_order_item(pool: asyncpg.Pool, order_item_id: int) -> bool: res = await _execute(pool,
-                                                                                                  "DELETE FROM order_items WHERE id = $1",
+                                                                                                  "DELETE FROM "
+                                                                                                  "order_items WHERE "
+                                                                                                  "id = $1",
                                                                                                   order_item_id); return res and "DELETE 1" in res
 
 
@@ -258,14 +264,16 @@ async def recalculate_order_total_amount(pool: asyncpg.Pool, order_id: int) -> f
 
 
 async def delete_order(pool: asyncpg.Pool, order_id: int) -> bool: res = await _execute(pool,
-                                                                                        "DELETE FROM orders WHERE id = $1",
+                                                                                        "DELETE FROM orders WHERE id "
+                                                                                        "= $1",
                                                                                         order_id); return res and "DELETE 1" in res
 
 
 async def add_item_to_existing_order(pool: asyncpg.Pool, order_id: int, item_name: str, category_name: str,
                                      chosen_price: float, quantity: int, details: str = None) -> int | None:
     query = (
-        "INSERT INTO order_items (order_id, item_name, category_name, chosen_price, quantity, details) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id")
+        "INSERT INTO order_items (order_id, item_name, category_name, chosen_price, quantity, details) VALUES ($1, "
+        "$2, $3, $4, $5, $6) RETURNING id")
     return await _execute(pool, query, order_id, item_name, category_name, chosen_price, quantity, details, fetch='val')
 
 
@@ -299,14 +307,17 @@ async def add_items_to_existing_order(pool: asyncpg.Pool, order_id: int, items_t
 
 async def get_sales_summary_for_period(pool: asyncpg.Pool, start_date: date, end_date: date) -> tuple:
     query = (
-        "SELECT COUNT(id), COALESCE(SUM(total_amount), 0.0) FROM orders WHERE status = 'completed' AND created_at::date BETWEEN $1 AND $2")
+        "SELECT COUNT(id), COALESCE(SUM(total_amount), 0.0) FROM orders WHERE status = 'completed' AND "
+        "created_at::date BETWEEN $1 AND $2")
     res = await _execute(pool, query, start_date, end_date, fetch='row');
     return (res[0], res[1]) if res else (0, 0.0)
 
 
 async def get_sold_items_details_for_period(pool: asyncpg.Pool, start_date: date, end_date: date) -> list:
     query = (
-        "SELECT oi.item_name, SUM(oi.quantity) as total_quantity_sold FROM order_items oi JOIN orders o ON oi.order_id = o.id WHERE o.status = 'completed' AND o.created_at::date BETWEEN $1 AND $2 GROUP BY oi.item_name ORDER BY total_quantity_sold DESC")
+        "SELECT oi.item_name, SUM(oi.quantity) as total_quantity_sold FROM order_items oi JOIN orders o ON "
+        "oi.order_id = o.id WHERE o.status = 'completed' AND o.created_at::date BETWEEN $1 AND $2 GROUP BY "
+        "oi.item_name ORDER BY total_quantity_sold DESC")
     return await _execute(pool, query, start_date, end_date, fetch='all')
 
 

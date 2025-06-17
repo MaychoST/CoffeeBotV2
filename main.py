@@ -1,4 +1,4 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ 11.0 - ЧИСТАЯ)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ ДЛЯ ЗАПУСКА)
 
 import logging
 from contextlib import asynccontextmanager
@@ -12,7 +12,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 from fastapi import FastAPI, Request, Response
 
 from config import BOT_TOKEN, DATABASE_URL, REDIS_TOKEN, REDIS_URL
-from database import initialize_database
+from database import initialize_database  # Импорт оставляем, он больше не вредит
 from handlers import (admin_menu_management_router, common_router, order_router,
                       report_router, staff_router, start_router)
 
@@ -41,13 +41,18 @@ class DbPoolMiddleware(BaseMiddleware):
 async def lifespan(app: FastAPI):
     logger.info("Application startup...")
 
+    # Шаг 1: Создаем пул соединений с PostgreSQL. Это быстрая операция.
     db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
-    await initialize_database(db_pool)
-    logger.info("Database connection established and initialized.")
+    logger.info("Database connection pool established.")
+    # ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ УДАЛЕНА ИЗ LIFESPAN.
+    # ОНА ВЫПОЛНЯЕТСЯ ОТДЕЛЬНО СКРИПТОМ init_db.py
 
+    # Шаг 2: Создаем подключение к Redis для FSM
     redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '').replace('http://', '')}"
     storage = RedisStorage.from_url(redis_connection_url)
+    logger.info("Redis storage configured.")
 
+    # Шаг 3: Настраиваем бота и диспетчер
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher(storage=storage)
 
@@ -60,14 +65,16 @@ async def lifespan(app: FastAPI):
 
     dp.update.outer_middleware.register(DbPoolMiddleware(db_pool))
 
+    # Шаг 4: Сохраняем важные объекты в state приложения для доступа из обработчиков
     app.state.bot = bot
     app.state.dp = dp
     app.state.db_pool = db_pool
 
-    logger.info("Dispatcher configured and ready.")
+    logger.info("Dispatcher configured and ready. Application is running.")
 
     yield
 
+    # --- Код, который выполнится при остановке приложения ---
     logger.info("Application shutdown...")
     if hasattr(app.state, 'dp') and app.state.dp:
         await app.state.dp.storage.close()
@@ -93,6 +100,11 @@ async def process_webhook(request: Request, response: Response):
         await dp.feed_update(bot=bot, update=update)
     except Exception as e:
         logger.error(f"Error processing update: {e}", exc_info=True)
+        # На время отладки можно вернуть 500, чтобы видеть ошибку в Vercel
+        response.status_code = 500
+        return {"status": "error"}
+
+        # В боевом режиме всегда возвращаем 200, чтобы Telegram не спамил
         response.status_code = 200
         return response
 
@@ -102,4 +114,4 @@ async def process_webhook(request: Request, response: Response):
 
 @app.get("/")
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "message": "CoffeeBotV2 is alive!"}
