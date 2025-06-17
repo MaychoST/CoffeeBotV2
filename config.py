@@ -1,39 +1,30 @@
-# Имя файла: config.py (ДИАГНОСТИЧЕСКАЯ ВЕРСИЯ БЕЗ ПРОВЕРОК)
+# Имя файла: config.py (ФИНАЛЬНАЯ БОЕВАЯ ВЕРСИЯ)
 import os
 import logging
 from dotenv import load_dotenv
 
-# Загружаем переменные окружения из .env файла
 load_dotenv()
-
 logger = logging.getLogger(__name__)
 
-# --- Секреты бота ---
+# Секреты бота
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASS")
 BARISTA_PASSWORD = os.getenv("BARISTA_PASS")
 
-# --- Переменные для подключения к базам данных ---
+# Подключения
 DATABASE_URL = os.getenv("DATABASE_URL")
 REDIS_DSN = os.getenv("REDIS_DSN")
 
-
-# --- ПРОВЕРКИ (ОСТАВЛЯЕМ ТОЛЬКО ЛОГИРОВАНИЕ ДЛЯ ДИАГНОСТИКИ) ---
+# Критические проверки при запуске
 if not BOT_TOKEN:
-    logger.critical("ДИАГНОСТИКА: Переменная окружения TELEGRAM_BOT_TOKEN не найдена!")
-    # raise ValueError("TELEGRAM_BOT_TOKEN must be set")
-
+    raise ValueError("TELEGRAM_BOT_TOKEN must be set")
 if not DATABASE_URL:
-    logger.critical("ДИАГНОСТИКА: Переменная окружения DATABASE_URL не найдена!")
-    # raise ValueError("DATABASE_URL must be set")
-
+    raise ValueError("DATABASE_URL must be set")
 if not REDIS_DSN:
-    logger.critical("ДИАГНОСТИКА: Переменная окружения REDIS_DSN не найдена!")
-    # raise ValueError("REDIS_DSN must be set")
+    raise ValueError("REDIS_DSN must be set")
 
-# --- Некритические проверки (предупреждения) ---
+# Некритические проверки
 if not ADMIN_PASSWORD:
-    logger.warning("Переменная окружения ADMIN_PASS не установлена. Функционал администратора будет недоступен.")
-
+    logger.warning("ADMIN_PASS не установлен.")
 if not BARISTA_PASSWORD:
-    logger.warning("Переменная окружения BARISTA_PASS не установлена. Функционал бариста будет недоступен.")
+    logger.warning("BARISTA_PASS не установлен.")
