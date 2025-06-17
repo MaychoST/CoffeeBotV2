@@ -1,18 +1,17 @@
-# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ ДЛЯ ЗАПУСКА)
+# Имя файла: main.py (ФИНАЛЬНАЯ ВЕРСИЯ С REDIS_DSN)
 
 import logging
 from contextlib import asynccontextmanager
 from typing import Callable, Dict, Any, Awaitable
 
 import asyncpg
-import redis.asyncio as redis
 from aiogram import BaseMiddleware, Bot, Dispatcher, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.redis import RedisStorage
 from fastapi import FastAPI, Request, Response
 
-from config import BOT_TOKEN, DATABASE_URL, REDIS_TOKEN, REDIS_URL
-from database import initialize_database  # Импорт оставляем, он больше не вредит
+from config import BOT_TOKEN, DATABASE_URL, REDIS_DSN  # <-- ИЗМЕНЕНИЕ ЗДЕСЬ
+from database import initialize_database
 from handlers import (admin_menu_management_router, common_router, order_router,
                       report_router, staff_router, start_router)
 
@@ -36,20 +35,18 @@ class DbPoolMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
-# --- LIFESPAN: Управляет только подключениями ---
+# --- LIFESPAN: Управляет жизненным циклом приложения ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Application startup...")
 
-    # Шаг 1: Создаем пул соединений с PostgreSQL. Это быстрая операция.
+    # Шаг 1: Создаем пул соединений с PostgreSQL.
     db_pool = await asyncpg.create_pool(DATABASE_URL, command_timeout=60)
     logger.info("Database connection pool established.")
-    # ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ УДАЛЕНА ИЗ LIFESPAN.
-    # ОНА ВЫПОЛНЯЕТСЯ ОТДЕЛЬНО СКРИПТОМ init_db.py
 
-    # Шаг 2: Создаем подключение к Redis для FSM
-    redis_connection_url = f"rediss://default:{REDIS_TOKEN}@{REDIS_URL.replace('https://', '').replace('http://', '')}"
-    storage = RedisStorage.from_url(redis_connection_url)
+    # Шаг 2: Создаем подключение к Redis для FSM, используя готовую строку DSN
+    # <-- ГЛАВНОЕ ИЗМЕНЕНИЕ ЗДЕСЬ
+    storage = RedisStorage.from_url(REDIS_DSN)
     logger.info("Redis storage configured.")
 
     # Шаг 3: Настраиваем бота и диспетчер
@@ -100,10 +97,6 @@ async def process_webhook(request: Request, response: Response):
         await dp.feed_update(bot=bot, update=update)
     except Exception as e:
         logger.error(f"Error processing update: {e}", exc_info=True)
-        # На время отладки можно вернуть 500, чтобы видеть ошибку в Vercel
-        response.status_code = 500
-        return {"status": "error"}
-
         # В боевом режиме всегда возвращаем 200, чтобы Telegram не спамил
         response.status_code = 200
         return response
